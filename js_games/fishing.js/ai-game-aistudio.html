@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fishing Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas" width="800" height="400"></canvas>
+        <div id="start-message">Click SPACE to Start</div>
+        <div id="game-over-message" style="display: none;">
+            <h1>Game Over</h1>
+            <p>Your Score: <span id="final-score"></span></p>
+            <p>High Scores:</p>
+            <ul id="high-scores-list"></ul>
+            <p>Click SPACE to Restart</p>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,35 @@
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    background-color: #add8e6; /* Light blue background for the page */
+}
+
+#game-container {
+    position: relative;
+    border: 2px solid black;
+}
+
+#game-canvas {
+    background-color: #0077be; /* Deep blue for the underwater */
+    display: block; /* Remove extra space below the canvas */
+}
+
+#start-message, #game-over-message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    font-size: 20px;
+}
+
+#high-scores-list {
+    list-style: none;
+    padding: 0;
+}

@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Fishing Game</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+
+        canvas {
+            border: 2px solid #333;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game constants
+        const GAME_WIDTH = 800;
+        const GAME_HEIGHT = 400;
+        const WATER_LINE = GAME_HEIGHT * 0.2;
+        const ROW_HEIGHT = (GAME_HEIGHT - WATER_LINE) / 4;
+        const BASE_FISH_SPEED = 2;
+        const HOOK_SPEED = 5;
+        const GAME_DURATION = 60;
+        const MAX_FISH_PER_ROW = 3;
+        const MAX_TOTAL_FISH = 8;
+        const MIN_POINTS = 2;
+        const MAX_POINTS = 10;
+        const MISS_PENALTY = 1;
+
+        // Game state
+        const GameState = {
+            WAITING_TO_START: 'waitingToStart',
+            PLAYING: 'playing',
+            GAME_OVER: 'gameOver'
+        };
+
+        let gameState = GameState.WAITING_TO_START;
+        let fishes = [];
+        let hookPosition = {
+            x: GAME_WIDTH / 2,
+            y: WATER_LINE
+        };
+        let score = 0;
+        let timeLeft = GAME_DURATION;
+        let gameTimer = null;
+        let highScores = JSON.parse(localStorage.getItem('fishingHighScores')) || [];
+        let lastScoreChange = { points: 0, time: 0 }; // For displaying score changes
+
+        class Fish {
+            constructor(row) {
+                this.row = row;
+                this.direction = Math.random() < 0.5 ? 1 : -1;
+                this.x = this.direction === 1 ? 0 : GAME_WIDTH;
+                this.y = WATER_LINE + (row + 0.5) * ROW_HEIGHT;
+                this.width = 40;
+                this.height = 20;
+                this.hasCrossedOnce = false;
+                // Random speed between 0.5x and 2x base speed
+                this.speed = BASE_FISH_SPEED * (0.5 + Math.random() * 1.5);
+                // Calculate points based on speed
+                const speedFactor = (this.speed - BASE_FISH_SPEED * 0.5) / (BASE_FISH_SPEED * 1.5);
+                this.points = Math.floor(MIN_POINTS + speedFactor * (MAX_POINTS - MIN_POINTS));
+            }
+
+            update() {
+                this.x += this.direction * this.speed;
+                if (this.x > GAME_WIDTH) {
+                    this.hasCrossedOnce = true;
+                    this.direction = -1;
+                } else if (this.x < 0) {
+                    this.hasCrossedOnce = true;
+                    this.direction = 1;
+                }
+            }
+
+            draw() {
+                // Color varies slightly based on points value
+                const pointsFactor = (this.points - MIN_POINTS) / (MAX_POINTS - MIN_POINTS);
+                const red = Math.floor(255 * (0.7 + pointsFactor * 0.3));
+                const blue = Math.floor(107 * (1 - pointsFactor * 0.3));
+                ctx.fillStyle = `rgb(${red}, 107, ${blue})`;
+
+                ctx.beginPath();
+                if (this.direction === 1) {
+                    ctx.moveTo(this.x, this.y);
+                    ctx.lineTo(this.x + this.width, this.y - this.height / 2);
+                    ctx.lineTo(this.x + this.width, this.y + this.height / 2);
+                } else {
+                    ctx.moveTo(this.x + this.width, this.y);
+                    ctx.lineTo(this.x, this.y - this.height / 2);
+                    ctx.lineTo(this.x, this.y + this.height / 2);
+                }
+                ctx.closePath();
+                ctx.fill();
+
+                // Draw points value above fish
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Arial';
+                ctx.fillText(`${this.points}pts`, this.x, this.y - 15);
+            }
+        }
+
+        function updateHighScores(newScore) {
+            highScores.push(newScore);
+            highScores.sort((a, b) => b - a);
+            highScores = highScores.slice(0, 10);
+            localStorage.setItem('fishingHighScores', JSON.stringify(highScores));
+        }
+
+        function drawBackground() {
+            // Sky
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, GAME_WIDTH, WATER_LINE);
+
+            // Water
+            ctx.fillStyle = '#1E90FF';
+            ctx.fillRect(0, WATER_LINE, GAME_WIDTH, GAME_HEIGHT - WATER_LINE);
+
+            // Person
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(GAME_WIDTH / 2 - 20, 20, 40, 60);
+
+            // Fishing rod
+            ctx.strokeStyle = '#8B4513';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(GAME_WIDTH / 2, 40);
+            ctx.lineTo(GAME_WIDTH / 2 + 50, 20);
+            ctx.stroke();
+
+            // Fishing line
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(GAME_WIDTH / 2 + 50, 20);
+            ctx.lineTo(hookPosition.x, hookPosition.y);
+            ctx.stroke();
+
+            // Hook
+            ctx.beginPath();
+            ctx.arc(hookPosition.x, hookPosition.y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#SILVER';
+            ctx.fill();
+        }
+
+        function drawScoreChange() {
+            if (Date.now() - lastScoreChange.time < 1000) {
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                if (lastScoreChange.points > 0) {
+                    ctx.fillStyle = 'lime';
+                    ctx.fillText(`+${lastScoreChange.points}`, hookPosition.x, hookPosition.y - 20);
+                } else {
+                    ctx.fillStyle = 'red';
+                    ctx.fillText(lastScoreChange.points, hookPosition.x, hookPosition.y - 20);
+                }
+                ctx.textAlign = 'left';
+            }
+        }
+
+        function drawUI() {
+            ctx.fillStyle = '#000000';
+            ctx.font = '20px Arial';
+
+            if (gameState === GameState.PLAYING) {
+                ctx.fillText(`Score: ${score}`, 10, 30);
+                ctx.fillText(`Time: ${timeLeft}s`, GAME_WIDTH - 100, 30);
+                drawScoreChange();
+            } else if (gameState === GameState.WAITING_TO_START) {
+                ctx.font = '30px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Press SPACE to Start', GAME_WIDTH / 2, GAME_HEIGHT / 2);
+                ctx.font = '20px Arial';
+                ctx.fillText('Faster fish = More points!', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 40);
+                ctx.fillText('Miss = -1 point', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 70);
+                ctx.textAlign = 'left';
+            } else if (gameState === GameState.GAME_OVER) {
+                ctx.font = '30px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Game Over!', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80);
+                ctx.fillText(`Final Score: ${score}`, GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40);
+
+                ctx.font = '20px Arial';
+                ctx.fillText('Top 3 High Scores:', GAME_WIDTH / 2, GAME_HEIGHT / 2);
+                for (let i = 0; i < Math.min(3, highScores.length); i++) {
+                    ctx.fillText(`${i + 1}. ${highScores[i]}`, GAME_WIDTH / 2, GAME_HEIGHT / 2 + 30 + i * 25);
+                }
+
+                ctx.fillText('Press SPACE to Play Again', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 120);
+                ctx.textAlign = 'left';
+            }
+        }
+
+        function countFishInRow(row) {
+            return fishes.filter(fish => fish.row === row).length;
+        }
+
+        function addFish() {
+            if (fishes.length < MAX_TOTAL_FISH) {
+                const availableRows = Array.from({ length: 4 }, (_, i) => i)
+                    .filter(row => countFishInRow(row) < MAX_FISH_PER_ROW);
+
+                if (availableRows.length > 0) {
+                    const randomRow = availableRows[Math.floor(Math.random() * availableRows.length)];
+                    fishes.push(new Fish(randomRow));
+                }
+            }
+        }
+
+        function checkCollision(fish) {
+            const hookRadius = 10;
+            const dx = hookPosition.x - (fish.x + fish.width / 2);
+            const dy = hookPosition.y - fish.y;
+            return Math.sqrt(dx * dx + dy * dy) < hookRadius + fish.width / 2;
+        }
+
+        function startGame() {
+            gameState = GameState.PLAYING;
+            score = 0;
+            timeLeft = GAME_DURATION;
+            fishes = [];
+            hookPosition = {
+                x: GAME_WIDTH / 2,
+                y: WATER_LINE
+            };
+            lastScoreChange = { points: 0, time: 0 };
+
+            gameTimer = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    endGame();
+                }
+            }, 1000);
+        }
+
+        function endGame() {
+            gameState = GameState.GAME_OVER;
+            clearInterval(gameTimer);
+            updateHighScores(score);
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+            drawBackground();
+
+            if (gameState === GameState.PLAYING) {
+                fishes = fishes.filter(fish => {
+                    fish.update();
+                    fish.draw();
+                    return !(fish.hasCrossedOnce && (fish.x < -fish.width || fish.x > GAME_WIDTH + fish.width));
+                });
+
+                if (Math.random() < 0.05) {
+                    addFish();
+                }
+            }
+
+            drawUI();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function tryToFish() {
+            let caught = false;
+            fishes.forEach((fish, index) => {
+                if (checkCollision(fish)) {
+                    fishes.splice(index, 1);
+                    score += fish.points;
+                    lastScoreChange = { points: fish.points, time: Date.now() };
+                    caught = true;
+                }
+            });
+
+            if (!caught) {
+                score = Math.max(0, score - MISS_PENALTY);
+                lastScoreChange = { points: -MISS_PENALTY, time: Date.now() };
+            }
+        }
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === ' ') {
+                if (gameState === GameState.WAITING_TO_START || gameState === GameState.GAME_OVER) {
+                    startGame();
+                } else if (gameState === GameState.PLAYING) {
+                    tryToFish();
+                }
+            }
+
+            if (gameState === GameState.PLAYING) {
+                switch (event.key) {
+                    case 'ArrowUp':
+                        if (hookPosition.y > WATER_LINE) {
+                            hookPosition.y -= HOOK_SPEED;
+                        }
+                        break;
+                    case 'ArrowDown':
+                        if (hookPosition.y < GAME_HEIGHT - 10) {
+                            hookPosition.y += HOOK_SPEED;
+                        }
+                        break;
+                }
+            }
+        });
+
+        gameLoop();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fishing Game</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #87CEEB;
+        }
+
+        canvas {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const gameWidth = 800;
+        const gameHeight = 400;
+        const waterHeight = gameHeight * 0.8;
+        const aboveWaterHeight = gameHeight * 0.2;
+        const rows = 4;
+        const maxFishes = 5;
+        const fishSpeeds = [2, 4, 6, 8, 10];
+        let fishes = [];
+        let score = 0;
+        let highScores = JSON.parse(localStorage.getItem('highScores')) || [];
+        let gameStarted = false;
+        let gameTime = 60;
+        let fishingRod = { x: gameWidth / 2, y: aboveWaterHeight, hookY: aboveWaterHeight + 10 };
+        let gameOver = false;
+
+        document.addEventListener('keydown', handleKeyDown);
+
+        function handleKeyDown(e) {
+            if (!gameStarted && e.code === 'Space') {
+                startGame();
+            } else if (gameStarted) {
+                if (e.code === 'ArrowUp') {
+                    fishingRod.hookY = Math.max(aboveWaterHeight + 10, fishingRod.hookY - 10);
+                } else if (e.code === 'ArrowDown') {
+                    fishingRod.hookY = Math.min(gameHeight - 10, fishingRod.hookY + 10);
+                } else if (e.code === 'Space') {
+                    checkCatch();
+                }
+            }
+        }
+
+        function startGame() {
+            gameStarted = true;
+            gameOver = false;
+            score = 0;
+            gameTime = 60;
+            fishes = [];
+            setInterval(updateGame, 1000 / 60);
+            setInterval(() => {
+                if (gameTime > 0) gameTime--;
+                else endGame();
+            }, 1000);
+        }
+
+        function endGame() {
+            gameStarted = false;
+            gameOver = true;
+            highScores.push(score);
+            highScores.sort((a, b) => b - a);
+            highScores = highScores.slice(0, 10);
+            localStorage.setItem('highScores', JSON.stringify(highScores));
+        }
+
+        function updateGame() {
+            ctx.clearRect(0, 0, gameWidth, gameHeight);
+            drawScene();
+            drawFishingRod();
+            updateFishes();
+            drawFishes();
+            drawScore();
+            drawTimer();
+            if (gameOver) drawGameOverMessage();
+        }
+
+        function drawScene() {
+            ctx.fillStyle = '#00BFFF';
+            ctx.fillRect(0, aboveWaterHeight, gameWidth, waterHeight);
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, gameWidth, aboveWaterHeight);
+        }
+
+        function drawFishingRod() {
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(fishingRod.x - 5, fishingRod.y, 10, fishingRod.hookY - fishingRod.y);
+            ctx.beginPath();
+            ctx.arc(fishingRod.x, fishingRod.hookY, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#FF0000';
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        function updateFishes() {
+            if (fishes.length < maxFishes && Math.random() < 0.02) {
+                const row = Math.floor(Math.random() * rows);
+                const speed = fishSpeeds[Math.floor(Math.random() * fishSpeeds.length)];
+                const direction = Math.random() < 0.5 ? 1 : -1;
+                const x = direction === 1 ? 0 : gameWidth;
+                fishes.push({ x, y: aboveWaterHeight + (row + 0.5) * (waterHeight / rows), speed, direction });
+            }
+
+            fishes.forEach(fish => {
+                fish.x += fish.speed * fish.direction;
+                if (fish.x < 0 || fish.x > gameWidth) {
+                    fish.direction *= -1;
+                }
+            });
+
+            fishes = fishes.filter(fish => fish.x >= 0 && fish.x <= gameWidth);
+        }
+
+        function drawFishes() {
+            ctx.fillStyle = '#FFD700';
+            fishes.forEach(fish => {
+                ctx.beginPath();
+                ctx.arc(fish.x, fish.y, 10, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.closePath();
+            });
+        }
+
+        function checkCatch() {
+            const caughtFish = fishes.find(fish => Math.abs(fish.x - fishingRod.x) < 10 && Math.abs(fish.y - fishingRod.hookY) < 10);
+            if (caughtFish) {
+                score += caughtFish.speed / 2;
+                fishes = fishes.filter(fish => fish !== caughtFish);
+            } else {
+                score = Math.max(0, score - 1);
+            }
+        }
+
+        function drawScore() {
+            ctx.fillStyle = '#000';
+            ctx.font = '20px Arial';
+            ctx.fillText(`Score: ${score}`, 10, 30);
+        }
+
+        function drawTimer() {
+            ctx.fillStyle = '#000';
+            ctx.font = '20px Arial';
+            ctx.fillText(`Time: ${gameTime}`, gameWidth - 100, 30);
+        }
+
+        function drawStartMessage() {
+            ctx.fillStyle = '#000';
+            ctx.font = '30px Arial';
+            ctx.fillText('Press Space to Start', gameWidth / 2 - 150, gameHeight / 2);
+        }
+
+        function drawGameOverMessage() {
+            ctx.fillStyle = '#000';
+            ctx.font = '30px Arial';
+            ctx.fillText(`Game Over! Your score: ${score}`, gameWidth / 2 - 150, gameHeight / 2 - 30);
+            ctx.font = '20px Arial';
+            ctx.fillText(`High Scores: ${highScores.join(', ')}`, gameWidth / 2 - 150, gameHeight / 2);
+            ctx.fillText('Press Space to restart.', gameWidth / 2 - 150, gameHeight / 2 + 30);
+        }
+
+        drawStartMessage();
+    </script>
+</body>
+
+</html>

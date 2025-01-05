@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Space Invasion</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #000;
+            color: white;
+            font-family: sans-serif;
+        }
+
+        canvas {
+            border: 1px solid white;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <script>
+        // --- Constants & Game Setup ---
+        const GAME_WIDTH = 800;
+        const GAME_HEIGHT = 600;
+        const TEXT_AREA_HEIGHT = GAME_HEIGHT * 0.05;
+        const ENEMY_AREA_HEIGHT = GAME_HEIGHT * 0.75;
+        const CASTLE_AREA_HEIGHT = GAME_HEIGHT * 0.1;
+        const PLAYER_AREA_HEIGHT = GAME_HEIGHT * 0.1;
+
+        const ENEMY_ROWS = 8;
+        const ENEMIES_PER_ROW = 12;
+        const ENEMY_HORIZONTAL_SPACE = 0.2;
+        const ENEMY_VERTICAL_SPACE = 0.1;
+        const ENEMY_START_MOVEMENT_SPEED = 0.01;
+        const ENEMY_SPEED_INCREASE_RATE = 0.005;
+        const ENEMY_SPEED_INCREASE_INTERVAL = 20;
+        const BOMB_DROP_INTERVAL_START = 1;
+        const BOMB_DROP_INTERVAL_INCREASE_RATE = 0.1;
+        const BOMB_DROP_INTERVAL_INCREASE_INTERVAL = 10;
+        const CASTLE_COUNT = 5;
+        const ENEMY_SIZE_REDUCTION = 0.1; //10% size reduction
+        const BOLT_FIRE_INTERVAL = 0.5; //0.5 seconds between bolts
+        const CASTLE_HIT_REDUCTION = 10;
+        const STAGE_TRANSITION_TIME = 3; // 3 second countdown
+        const ENEMY_SPEED_INCREASE_ON_STAGE_WIN = 0.3; //30% speed increase
+        const ENEMY_DROP_ON_DIRECTION_CHANGE = 0.05;
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = GAME_WIDTH;
+        canvas.height = GAME_HEIGHT;
+
+        let gameState = 'start'; // start, playing, gameover, win
+        let score = 0;
+        let lastTime = 0;
+        let enemyMoveDirection = 1; // 1 for right, -1 for left
+        let enemyMovementSpeed = ENEMY_START_MOVEMENT_SPEED;
+        let timeSinceSpeedIncrease = 0;
+        let timeSinceBombDrop = 0;
+        let bombDropInterval = BOMB_DROP_INTERVAL_START;
+        let timeSinceBombDropIncrease = 0;
+        let enemies = [];
+        let bombs = [];
+        let bolts = [];
+        let castles = [];
+        let playerShip;
+        let playerLives;
+        let timeSinceLastBolt = 0;
+        let stageTransitionTimer = 0;
+        let isPaused = false;
+        let escPressCount = 0;
+
+
+        function initializeGame() {
+            // --- Game Objects ---
+            enemies = createEnemies();
+            castles = createCastles();
+            playerShip = createPlayerShip();
+            bombs = [];
+            bolts = [];
+            enemyMoveDirection = 1;
+            timeSinceSpeedIncrease = 0;
+            timeSinceBombDrop = 0;
+            bombDropInterval = BOMB_DROP_INTERVAL_START;
+            timeSinceBombDropIncrease = 0;
+            timeSinceLastBolt = 0;
+            gameState = 'playing';
+            // Start the game loop
+            requestAnimationFrame(update);
+        }
+
+
+        function resetGame() {
+            enemyMovementSpeed *= (1 + ENEMY_SPEED_INCREASE_ON_STAGE_WIN);
+            initializeGame();
+        }
+
+
+        function createEnemies() {
+            const enemies = [];
+            const enemyWidth = ((GAME_WIDTH * 0.8) / (ENEMIES_PER_ROW + (ENEMIES_PER_ROW / 4) + (ENEMIES_PER_ROW / 12))) * (1 - ENEMY_SIZE_REDUCTION);
+            const enemyHeight = ((ENEMY_AREA_HEIGHT * 0.8) / ENEMY_ROWS) * (1 - ENEMY_SIZE_REDUCTION);
+
+            for (let row = 0; row < ENEMY_ROWS; row++) {
+                for (let col = 0; col < ENEMIES_PER_ROW; col++) {
+                    const x = (GAME_WIDTH * 0.1) + col * ((GAME_WIDTH * 0.8) / (ENEMIES_PER_ROW + (ENEMIES_PER_ROW / 4) + (ENEMIES_PER_ROW / 12))) + Math.floor(col / 4) * ((GAME_WIDTH * 0.8) / (ENEMIES_PER_ROW + (ENEMIES_PER_ROW / 4) + (ENEMIES_PER_ROW / 12))) * ENEMY_HORIZONTAL_SPACE;
+                    const y = TEXT_AREA_HEIGHT + row * ((ENEMY_AREA_HEIGHT * 0.8) / ENEMY_ROWS) + row * ((ENEMY_AREA_HEIGHT * 0.8) / ENEMY_ROWS) * ENEMY_VERTICAL_SPACE;
+
+                    enemies.push({
+                        x: x + enemyWidth * ENEMY_SIZE_REDUCTION / 2,
+                        y: y + enemyHeight * ENEMY_SIZE_REDUCTION / 2,
+                        width: enemyWidth,
+                        height: enemyHeight,
+                        alive: true,
+                        row: row,
+                    });
+                }
+            }
+            return enemies;
+        }
+
+        function createCastles() {
+            const castles = [];
+            const castleWidth = (GAME_WIDTH * 0.7) / CASTLE_COUNT;
+            const castleHeight = CASTLE_AREA_HEIGHT * 0.8;
+            const castleSpace = (GAME_WIDTH * 0.3) / (CASTLE_COUNT + 1);
+
+            for (let i = 0; i < CASTLE_COUNT; i++) {
+                const x = castleSpace + i * (castleWidth + castleSpace);
+                const y = TEXT_AREA_HEIGHT + ENEMY_AREA_HEIGHT + (CASTLE_AREA_HEIGHT - castleHeight) / 2;
+                castles.push({
+                    x: x,
+                    y: y,
+                    width: castleWidth,
+                    height: castleHeight,
+                    hitPoints: 100,
+                    hitAreas: [],
+                    alive: true,
+                });
+            }
+            return castles;
+        }
+
+
+        function createPlayerShip() {
+            const playerWidth = GAME_WIDTH * 0.1;
+            const playerHeight = PLAYER_AREA_HEIGHT * 0.8;
+            return {
+                x: (GAME_WIDTH - playerWidth) / 2,
+                y: TEXT_AREA_HEIGHT + ENEMY_AREA_HEIGHT + CASTLE_AREA_HEIGHT + (PLAYER_AREA_HEIGHT - playerHeight) / 2,
+                width: playerWidth,
+                height: playerHeight,
+                speed: 0.3,
+                moveLeft: false,
+                moveRight: false,
+            };
+        }
+
+
+        // --- Game Logic ---
+        function update(time) {
+            const deltaTime = (time - lastTime) / 1000; // Convert to seconds
+            lastTime = time;
+
+            if (gameState === 'win') {
+                stageTransitionTimer -= deltaTime;
+                if (stageTransitionTimer <= 0) {
+                    resetGame();
+                }
+                render();
+                requestAnimationFrame(update);
+                return;
+            }
+
+            if (isPaused) {
+                render();
+                requestAnimationFrame(update);
+                return;
+            }
+
+            if (gameState !== 'playing') return;
+
+            timeSinceLastBolt += deltaTime;
+            updateEnemies(deltaTime);
+            updateBombs(deltaTime);
+            updateBolts(deltaTime);
+            updatePlayer(deltaTime);
+            checkCollisions();
+            checkGameOver();
+            timeSinceSpeedIncrease += deltaTime;
+            if (timeSinceSpeedIncrease >= ENEMY_SPEED_INCREASE_INTERVAL) {
+                enemyMovementSpeed += ENEMY_SPEED_INCREASE_RATE;
+                timeSinceSpeedIncrease = 0;
+            }
+
+            timeSinceBombDrop += deltaTime;
+            if (timeSinceBombDrop >= bombDropInterval) {
+                dropBomb();
+                timeSinceBombDrop = 0;
+            }
+            timeSinceBombDropIncrease += deltaTime;
+            if (timeSinceBombDropIncrease >= BOMB_DROP_INTERVAL_INCREASE_INTERVAL) {
+                bombDropInterval += BOMB_DROP_INTERVAL_INCREASE_RATE;
+                timeSinceBombDropIncrease = 0;
+            }
+
+
+
+            if (allEnemiesDestroyed()) {
+                gameState = 'win';
+                stageTransitionTimer = STAGE_TRANSITION_TIME;
+                saveScore();
+
+            }
+
+
+            render();
+            requestAnimationFrame(update);
+        }
+
+        function updateEnemies(deltaTime) {
+            let shouldDrop = false;
+            let leftMostEnemy = GAME_WIDTH;
+            let rightMostEnemy = 0;
+
+            for (const enemy of enemies) {
+                if (enemy.alive) {
+                    enemy.x += enemyMovementSpeed * enemyMoveDirection * GAME_WIDTH * deltaTime;
+                    leftMostEnemy = Math.min(leftMostEnemy, enemy.x);
+                    rightMostEnemy = Math.max(rightMostEnemy, enemy.x + enemy.width)
+                }
+
+            }
+
+            if (leftMostEnemy <= (GAME_WIDTH * 0.01) && enemyMoveDirection === -1) {
+                enemyMoveDirection = 1;
+                shouldDrop = true;
+            }
+            if (rightMostEnemy >= (GAME_WIDTH * 0.99) && enemyMoveDirection === 1) {
+                enemyMoveDirection = -1;
+                shouldDrop = true;
+            }
+
+            if (shouldDrop) {
+                for (const enemy of enemies) {
+                    if (enemy.alive) {
+                        enemy.y += (GAME_HEIGHT * ENEMY_DROP_ON_DIRECTION_CHANGE);
+                    }
+                }
+            }
+        }
+
+        function updateBombs(deltaTime) {
+            for (let i = bombs.length - 1; i >= 0; i--) {
+                const bomb = bombs[i];
+                bomb.y += 0.4 * GAME_HEIGHT * deltaTime;
+                if (bomb.y > GAME_HEIGHT) {
+                    bombs.splice(i, 1);
+                }
+            }
+        }
+        function updateBolts(deltaTime) {
+            for (let i = bolts.length - 1; i >= 0; i--) {
+                const bolt = bolts[i];
+                bolt.y -= 0.8 * GAME_HEIGHT * deltaTime;
+                if (bolt.y < 0) {
+                    bolts.splice(i, 1);
+                }
+            }
+        }
+
+        function updatePlayer(deltaTime) {
+            if (playerShip.moveLeft) playerShip.x -= playerShip.speed * GAME_WIDTH * deltaTime;
+            if (playerShip.moveRight) playerShip.x += playerShip.speed * GAME_WIDTH * deltaTime;
+
+            playerShip.x = Math.max(0, Math.min(playerShip.x, GAME_WIDTH - playerShip.width));
+        }
+
+        function dropBomb() {
+            const aliveEnemies = enemies.filter(enemy => enemy.alive);
+            if (aliveEnemies.length > 0) {
+                const randomIndex = Math.floor(Math.random() * aliveEnemies.length);
+                const enemy = aliveEnemies[randomIndex];
+                bombs.push({
+                    x: enemy.x + enemy.width / 2,
+                    y: enemy.y + enemy.height,
+                    width: GAME_WIDTH * 0.02,
+                    height: GAME_HEIGHT * 0.02,
+                });
+            }
+        }
+
+
+        function checkCollisions() {
+            // Bolt and Enemy Collision
+            for (let i = bolts.length - 1; i >= 0; i--) {
+                const bolt = bolts[i];
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const enemy = enemies[j];
+                    if (enemy.alive && checkCollision(bolt, enemy)) {
+                        enemy.alive = false;
+                        score += (ENEMY_ROWS - enemy.row) * 10;
+                        bolts.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+
+            // Bolt and Castle collision
+            for (let i = bolts.length - 1; i >= 0; i--) {
+                const bolt = bolts[i];
+                for (let j = castles.length - 1; j >= 0; j--) {
+                    const castle = castles[j];
+                    if (castle.hitPoints > 0) {
+                        const collision = checkCollision(bolt, castle);
+                        if (collision) {
+                            reduceCastleSize(castle, bolt.x, bolt.y);
+                            bolts.splice(i, 1);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Enemy and Castle Collision
+            for (let j = enemies.length - 1; j >= 0; j--) {
+                const enemy = enemies[j];
+                if (enemy.alive) {
+                    for (let k = castles.length - 1; k >= 0; k--) {
+                        const castle = castles[k];
+                        if (castle.alive && checkCollision(enemy, castle)) {
+                            castle.alive = false;
+                            castles.splice(k, 1);
+                            enemy.alive = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Enemy and Player Collision
+            for (let j = enemies.length - 1; j >= 0; j--) {
+                const enemy = enemies[j];
+                if (enemy.alive) {
+                    if (checkCollision(enemy, playerShip)) {
+                        gameState = 'gameover';
+                        saveScore();
+                        score = 0;
+                        break;
+                    }
+                }
+            }
+
+
+            // Bomb and Castle Collision
+            for (let i = bombs.length - 1; i >= 0; i--) {
+                const bomb = bombs[i];
+                for (let j = castles.length - 1; j >= 0; j--) {
+                    const castle = castles[j];
+                    if (castle.hitPoints > 0) {
+                        const collision = checkCollision(bomb, castle);
+                        if (collision) {
+                            reduceCastleSize(castle, bomb.x, bomb.y);
+                            bombs.splice(i, 1);
+                            break;
+                        }
+                    }
+                }
+            }
+            // Bomb and Player Ship Collision
+            for (let i = bombs.length - 1; i >= 0; i--) {
+                const bomb = bombs[i];
+                if (checkCollision(bomb, playerShip)) {
+                    playerLives--;
+                    bombs.splice(i, 1);
+                    if (playerLives <= 0) {
+                        gameState = 'gameover';
+                        saveScore();
+                        score = 0;
+                    }
+                }
+            }
+        }
+
+        function reduceCastleSize(castle, x, y) {
+            const hitX = x - castle.x;
+            castle.hitPoints -= CASTLE_HIT_REDUCTION;
+
+            if (castle.hitPoints <= 0) return;
+
+            castle.hitAreas.push({
+                x: hitX,
+                hitPoints: CASTLE_HIT_REDUCTION,
+                width: castle.width * (CASTLE_HIT_REDUCTION / 100),
+            });
+        }
+
+        function checkCollision(rect1, rect2) {
+
+            let collision = (
+                rect1.x < rect2.x + rect2.width &&
+                rect1.x + rect1.width > rect2.x &&
+                rect1.y < rect2.y + rect2.height &&
+                rect1.y + rect1.height > rect2.y
+            );
+
+            if (collision && rect2.hitAreas) {
+                for (const hitArea of rect2.hitAreas) {
+                    if (rect1.x < rect2.x + hitArea.x + hitArea.width &&
+                        rect1.x + rect1.width > rect2.x + hitArea.x &&
+                        rect1.y < rect2.y + rect2.height &&
+                        rect1.y + rect1.height > rect2.y) {
+                        return false;
+                    }
+                }
+            }
+
+
+            return collision;
+        }
+
+        function checkGameOver() {
+            if (gameState === 'gameover' || gameState === 'win') {
+                return;
+            }
+
+        }
+
+        function allEnemiesDestroyed() {
+            return enemies.every(enemy => !enemy.alive);
+        }
+
+        function saveScore() {
+            const highScores = getHighScores();
+            highScores.push(score);
+            highScores.sort((a, b) => b - a);
+            if (highScores.length > 10) {
+                highScores.pop();
+            }
+            localStorage.setItem('highScores', JSON.stringify(highScores));
+        }
+
+        function getHighScores() {
+            const storedScores = localStorage.getItem('highScores');
+            return storedScores ? JSON.parse(storedScores) : [];
+        }
+
+        function renderHighScores() {
+            ctx.fillStyle = 'white';
+            ctx.font = '20px sans-serif';
+            ctx.textAlign = 'center';
+            const highScores = getHighScores();
+            ctx.fillText("High Scores:", GAME_WIDTH / 2, GAME_HEIGHT / 4);
+
+            for (let i = 0; i < highScores.length; i++) {
+                ctx.fillText(`${i + 1}. ${highScores[i]}`, GAME_WIDTH / 2, GAME_HEIGHT / 4 + (i + 1) * 20);
+            }
+
+        }
+
+
+        // --- Rendering ---
+        function render() {
+            ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            renderText();
+
+            if (gameState === 'playing') {
+                renderEnemies();
+                renderCastles();
+                renderPlayerShip();
+                renderBombs();
+                renderBolts();
+
+            } else if (gameState === 'start') {
+                renderHighScores();
+                ctx.fillStyle = 'white';
+                ctx.font = '30px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText("Press SPACEBAR to start", GAME_WIDTH / 2, GAME_HEIGHT * 3 / 4);
+            }
+            else if (gameState === 'gameover') {
+                ctx.fillStyle = 'red';
+                ctx.font = '30px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText("GAME OVER", GAME_WIDTH / 2, GAME_HEIGHT / 2);
+                ctx.font = '20px sans-serif';
+                ctx.fillText("Press SPACEBAR twice to play again", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 40);
+            }
+            else if (gameState === 'win') {
+                ctx.fillStyle = 'green';
+                ctx.font = '30px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText("Stage Complete! Next Stage in: " + stageTransitionTimer.toFixed(1), GAME_WIDTH / 2, GAME_HEIGHT / 2);
+            } else if (isPaused) {
+                ctx.fillStyle = 'yellow';
+                ctx.font = '30px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText("PAUSED", GAME_WIDTH / 2, GAME_HEIGHT / 2);
+
+            }
+        }
+
+        function renderText() {
+            ctx.fillStyle = 'white';
+            ctx.font = '20px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`Lives: ${playerLives} | Score: ${score} | State: ${gameState}`, 10, 20);
+        }
+
+        function renderEnemies() {
+            ctx.fillStyle = 'red';
+            for (const enemy of enemies) {
+                if (enemy.alive) {
+                    ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+                }
+            }
+        }
+
+        function renderCastles() {
+            ctx.fillStyle = 'grey';
+            for (const castle of castles) {
+                let currentWidth = castle.width;
+                if (castle.alive) {
+                    ctx.fillRect(castle.x, castle.y, currentWidth, castle.height);
+                    for (const hitArea of castle.hitAreas) {
+                        currentWidth -= hitArea.width;
+                        ctx.clearRect(castle.x + hitArea.x, castle.y, hitArea.width, castle.height)
+                    }
+
+                }
+            }
+        }
+
+        function renderPlayerShip() {
+            ctx.fillStyle = 'green';
+            ctx.fillRect(playerShip.x, playerShip.y, playerShip.width, playerShip.height);
+        }
+
+        function renderBombs() {
+            ctx.fillStyle = 'yellow';
+            for (const bomb of bombs) {
+                ctx.fillRect(bomb.x, bomb.y, bomb.width, bomb.height);
+            }
+        }
+        function renderBolts() {
+            ctx.fillStyle = 'cyan';
+            for (const bolt of bolts) {
+                ctx.fillRect(bolt.x - 2.5, bolt.y, 5, 15);
+            }
+        }
+
+
+        // --- Input Handling ---
+        let spaceBarCount = 0;
+        window.addEventListener('keydown', (event) => {
+            if (event.code === 'Space') {
+                if (gameState === 'win' || gameState === 'gameover') {
+                    spaceBarCount++;
+                    if (spaceBarCount >= 2) {
+                        if (gameState === 'start' || gameState === 'gameover') {
+                            playerLives = 3;
+                            score = 0;
+                        }
+                        initializeGame();
+                        spaceBarCount = 0;
+                    }
+                } else if (isPaused) {
+                    isPaused = false;
+                }
+                else if (gameState !== 'playing') {
+                    spaceBarCount++;
+                    if (spaceBarCount >= 2) {
+                        if (gameState === 'start' || gameState === 'gameover') {
+                            playerLives = 3;
+                        }
+                        initializeGame();
+                        spaceBarCount = 0;
+                    }
+                } else {
+                    if (timeSinceLastBolt >= BOLT_FIRE_INTERVAL) {
+                        bolts.push({
+                            x: playerShip.x + playerShip.width / 2,
+                            y: playerShip.y,
+                            width: 5,
+                            height: 15,
+                        });
+                        timeSinceLastBolt = 0;
+                    }
+                }
+            }
+
+            if (gameState === 'playing') {
+                if (event.code === 'ArrowLeft') {
+                    playerShip.moveLeft = true;
+                }
+                if (event.code === 'ArrowRight') {
+                    playerShip.moveRight = true;
+                }
+            }
+
+
+            if (event.code === 'Escape') {
+                escPressCount++;
+                if (escPressCount === 1 && gameState === 'playing') {
+                    isPaused = true;
+
+                } else if (escPressCount >= 2) {
+                    gameState = 'start';
+                    isPaused = false;
+                    escPressCount = 0;
+                }
+
+            }
+        });
+
+        window.addEventListener('keyup', (event) => {
+            if (gameState === 'playing') {
+                if (event.code === 'ArrowLeft') {
+                    playerShip.moveLeft = false;
+                }
+                if (event.code === 'ArrowRight') {
+                    playerShip.moveRight = false;
+                }
+            }
+        });
+
+
+        // --- Start Game Loop ---
+        render();
+        requestAnimationFrame(update);
+    </script>
+</body>
+
+</html>
